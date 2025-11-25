@@ -1,0 +1,99 @@
+:root {
+    --primary-color: #6c63ff;
+    --secondary-color: #4cafef;
+    --accent-color: #00b894;
+    --danger-color: #ff6b6b;
+
+    --bg-dark: #1e1e2f;
+    --bg-light: #2c2c3e;
+    --text-light: #f0f0f0;
+    --text-muted: #aaaaaa;
+}
+
+/* General background */
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-light);
+    font-family: "Segoe UI", "Roboto", sans-serif;
+}
+
+.block-container {
+    padding: 1rem !important;
+    max-width: 1200px;
+}
+
+/* Metrics as cards */
+.stMetric {
+    background: var(--bg-light);
+    border-radius: 12px;
+    padding: 15px;
+    margin: 8px 0;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Metric values */
+div[data-testid="stMetricValue"] {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+div[data-testid="stMetricLabel"] {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-light);
+}
+div[data-testid="stMetricDelta"] {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+/* Buttons */
+.stButton > button {
+    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    color: white;
+    border-radius: 8px;
+    font-weight: 600;
+    padding: 10px 20px;
+    border: none;
+    transition: all 0.3s ease;
+}
+.stButton > button:hover {
+    transform: scale(1.05);
+    background: var(--accent-color);
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    background: var(--bg-light);
+    border-radius: 8px;
+    padding: 6px;
+}
+.stTabs [data-baseweb="tab"] {
+    color: var(--text-light);
+    font-weight: 600;
+}
+
+/* Tables */
+.stDataFrame {
+    font-size: 14px;
+}
+.stDataFrame td, .stDataFrame th {
+    padding: 8px 12px !important;
+    border-bottom: 1px solid var(--bg-light);
+}
+.stDataFrame th {
+    background: var(--bg-light);
+    color: var(--accent-color);
+    font-weight: 600;
+}
+
+/* Footer */
+.footer-container {
+    text-align: center;
+    padding: 15px;
+    margin-top: 25px;
+    border-top: 1px solid var(--primary-color);
+    color: var(--text-muted);
+    font-size: 13px;
+}

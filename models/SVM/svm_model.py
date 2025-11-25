@@ -1,128 +1,109 @@
 import pandas as pd
-import pickle
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score
+import joblib
+import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.svm import SVC
-from sklearn.metrics import classification_report
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-import logging
+from sklearn.decomposition import PCA
+import subprocess
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+DATA_PATH = "StudentsPerformance.csv"
+OUTPUT_DIR = "outputs"
 
-def load_and_preprocess_data(filepath):
-    """Load and preprocess the dataset."""
-    try:
-        data = pd.read_csv(filepath)
-        # Handle missing values
-        data = data.dropna()
-        # Encode categorical variables
-        data = pd.get_dummies(data, drop_first=True)
-        return data
-    except Exception as e:
-        logger.error(f"Error loading data: {str(e)}")
-        raise
+def load_and_preprocess():
+    data = pd.read_csv(DATA_PATH)
+    data = pd.get_dummies(data, drop_first=True)
 
-def prepare_features_and_target(data):
-    """Prepare features and target variables."""
-    X = data.drop(['math score'], axis=1)
-    # Categorize math scores into Low, Medium, and High
-    y = pd.cut(data['math score'], 
-               bins=[0, 50, 70, 100], 
-               labels=['Low', 'Medium', 'High'])
-    y = y.astype(str)
-    
-    # Remove any NaN values
-    mask = ~y.isna()
-    X = X[mask]
-    y = y[mask]
+    bins = [0, 50, 70, 100]
+    labels = [0, 1, 2]
+    data["performance_level"] = pd.cut(data["math score"], bins=bins, labels=labels, include_lowest=True)
+
+    X = data.drop(["math score", "performance_level"], axis=1)
+    y = data["performance_level"]
     return X, y
 
-def train_model(X_train, y_train):
-    """Train the SVM model."""
-    # Scale the features
+def train_and_evaluate():
+    X, y = load_and_preprocess()
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    
-    # Train model
-    model = SVC(kernel='linear', probability=True, random_state=42)
-    
-    # Perform cross-validation
-    cv_scores = cross_val_score(model, X_train_scaled, y_train, cv=5)
-    logger.info(f"Cross-validation scores: {cv_scores}")
-    logger.info(f"Average CV score: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
-    
-    # Train final model
-    model.fit(X_train_scaled, y_train)
-    return model, scaler
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
 
-def save_artifacts(model, scaler, columns, model_path, columns_path, scaler_path):
-    """Save model and related artifacts."""
-    artifacts = [
-        (model, model_path),
-        (columns.tolist(), columns_path),  # Convert Index to list
-        (scaler, scaler_path)
-    ]
-    
-    for artifact, path in artifacts:
-        try:
-            with open(path, "wb") as f:
-                pickle.dump(artifact, f)
-        except Exception as e:
-            logger.error(f"Error saving to {path}: {str(e)}")
-            raise
+    model = SVC(kernel="rbf", probability=True, random_state=42)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
 
-def evaluate_model(model, X_test, y_test, scaler):
-    """Evaluate the model and save results."""
-    X_test_scaled = scaler.transform(X_test)
-    y_pred = model.predict(X_test_scaled)
-    
-    report = classification_report(y_test, y_pred, zero_division=0)
-    
-    # Save and print the report
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, average="weighted")
+    recall = recall_score(y_test, y_pred, average="weighted")
+    f1 = f1_score(y_test, y_pred, average="weighted")
+
+    print(f"Accuracy={accuracy:.2f}, Precision={precision:.2f}, Recall={recall:.2f}, F1={f1:.2f}")
+
+    os.makedirs("models/SVM", exist_ok=True)
+    joblib.dump(model, "models/SVM/student_performance_svm_model.pkl")
+    joblib.dump(scaler, "models/SVM/svm_model_scaler.pkl")
+    joblib.dump(X.columns, "models/SVM/svm_model_columns.pkl")
+
+    os.makedirs(f"{OUTPUT_DIR}/metrics", exist_ok=True)
+    with open(f"{OUTPUT_DIR}/metrics/svm_metrics.txt", "w") as f:
+        f.write(f"Accuracy={accuracy:.4f}\nPrecision={precision:.4f}\nRecall={recall:.4f}\nF1={f1:.4f}\n")
+
+    os.makedirs(f"{OUTPUT_DIR}/figures", exist_ok=True)
+
+    # Confusion Matrix
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(6,5))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.title("SVM - Confusion Matrix")
+    plt.savefig(f"{OUTPUT_DIR}/figures/svm_confusion_matrix.png")
+    plt.close()
+
+    # PCA Decision Boundaries
+    pca = PCA(n_components=2)
+    X_vis = pca.fit_transform(X_test)
+    model_pca = SVC(kernel="rbf", probability=True, random_state=42)
+    model_pca.fit(X_vis, y_test)
+
+    x_min, x_max = X_vis[:, 0].min() - 1, X_vis[:, 0].max() + 1
+    y_min, y_max = X_vis[:, 1].min() - 1, X_vis[:, 1].max() + 1
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200), np.linspace(y_min, y_max, 200))
+    Z = model_pca.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+
+    plt.figure(figsize=(6,5))
+    plt.contourf(xx, yy, Z, alpha=0.3, cmap="coolwarm")
+    plt.scatter(X_vis[:, 0], X_vis[:, 1], c=y_test, edgecolors="k", cmap="coolwarm", alpha=0.8)
+    plt.title("SVM - Decision Boundaries (PCA Projection)")
+    plt.xlabel("PCA 1")
+    plt.ylabel("PCA 2")
+    plt.savefig(f"{OUTPUT_DIR}/figures/svm_decision_boundaries.png")
+    plt.close()
+
+    # Classification Report Plot
+    report = classification_report(y_test, y_pred, output_dict=True)
+    metrics_df = pd.DataFrame(report).transpose().iloc[:3, :3]  # only precision, recall, f1
+    metrics_df.plot(kind="bar", figsize=(8,6))
+    plt.title("SVM - Classification Report")
+    plt.ylabel("Score")
+    plt.xticks(rotation=0)
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/figures/svm_classification_report.png")
+    plt.close()
+
     try:
-        with open("svm_model_evaluation.txt", "w") as file:
-            file.write(report)
-        logger.info("Classification Report:\n%s", report)
+        subprocess.run(["python", "analysis/generate_comparison.py"], check=True)
+        subprocess.run(["python", "analysis/generate_correlation.py"], check=True)
     except Exception as e:
-        logger.error(f"Error saving evaluation report: {str(e)}")
-        raise
-
-def main():
-    try:
-        # Load and preprocess data
-        data = load_and_preprocess_data("../DataSet/StudentsPerformance.csv")
-        
-        # Prepare features and target
-        X, y = prepare_features_and_target(data)
-        
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
-        
-        # Train model
-        model, scaler = train_model(X_train, y_train)
-        
-        # Save artifacts
-        save_artifacts(
-            model=model,
-            scaler=scaler,
-            columns=X.columns,
-            model_path="student_performance_svm_model.pkl",
-            columns_path="svm_model_columns.pkl",
-            scaler_path="svm_model_scaler.pkl"
-        )
-        
-        # Evaluate model
-        evaluate_model(model, X_test, y_test, scaler)
-        
-        logger.info("Model training and evaluation completed successfully!")
-        
-    except Exception as e:
-        logger.error(f"An error occurred: {str(e)}")
-        raise
+        print(f"⚠️ Warning: Could not run analysis scripts: {e}")
 
 if __name__ == "__main__":
-    main()
+    train_and_evaluate()

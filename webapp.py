@@ -1,128 +1,75 @@
 import streamlit as st
 import requests
-import seaborn as sns
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Add a description and instructions
-st.title("🎓 Parashikimi i Performancës së Studentëve")
-st.markdown("""
-Ky aplikacion parashikon performancën e studentëve bazuar në faktorë të ndryshëm. Plotësoni informacionin 
-e studentit në anën e majtë dhe klikoni 'Parashiko Performancën' për të parë rezultatet.
-""")
+st.set_page_config(page_title="🎓 Student Performance Predictor", layout="wide")
+st.title("🎓 Student Performance Predictor")
 
-# Move the styling configuration here, after the Streamlit context is established
-sns.set(style="whitegrid")
+st.sidebar.header("📥 Student Information")
 
-# Create two columns for better organization in the sidebar
-st.sidebar.header("📝 Informacioni i Studentit")
-col1, col2 = st.sidebar.columns(2)
+gender_map = {"Male": "male", "Female": "female"}
+prep_map = {"Yes": "completed", "No": "none"}
+lunch_map = {"Standard": "standard", "Free/Reduced": "free/reduced"}
+edu_map = {
+    "High School": "high school",
+    "Some High School": "some high school",
+    "Some College": "some college",
+    "Associate's Degree": "associate's degree",
+    "Bachelor": "bachelor's degree",
+    "Master": "master's degree"
+}
+race_map = {"Group A": "group A", "Group B": "group B", "Group C": "group C", "Group D": "group D", "Group E": "group E"}
 
-with col1:
-    gender = st.selectbox("Gjinia", ["Mashkull", "Femër"])
-    race_ethnicity = st.selectbox("Raca/Etnia", ["Grupi A", "Grupi B", "Grupi C", "Grupi D", "Grupi E"])
-    education = st.selectbox("Edukimi i Prindërve", ["Shkollë e Mesme", "Bachelor", "Master"])
-    prep_course = st.selectbox("Kursi i Përgatitjes për Test", ["Po", "Jo"])
+gender = st.sidebar.selectbox("Gender", list(gender_map.keys()))
+race_ethnicity = st.sidebar.selectbox("Race/Ethnicity", list(race_map.keys()))
+parental_education = st.sidebar.selectbox("Parental Education", list(edu_map.keys()))
+lunch = st.sidebar.selectbox("Lunch Type", list(lunch_map.keys()))
+prep_course = st.sidebar.selectbox("Test Preparation Course", list(prep_map.keys()))
+model_choice = st.sidebar.selectbox("Select Model", ["LinearRegression", "RandomForest", "SVM"])
 
-with col2:
-    lunch = st.selectbox("Lloji i Drekës", ["Standarde", "Falas/E Reduktuar"])
-    reading_score = st.slider("Rezultati në Lexim", 0, 100, 70, help="Rezultati i vlerësimit të leximit të studentit")
-    writing_score = st.slider("Rezultati në Shkrim", 0, 100, 70, help="Rezultati i vlerësimit të shkrimit të studentit")
-    study_time = st.selectbox("Koha e Studimit", ["E Ulët", "Mesatare", "E Lartë"])
+st.subheader("🔮 Predict Student Performance")
+if st.button("Run Prediction"):
+    data = {
+        "gender": gender_map[gender],
+        "race_ethnicity": race_map[race_ethnicity],
+        "parental_education": edu_map[parental_education],
+        "lunch": lunch_map[lunch],
+        "test_preparation_course": prep_map[prep_course]
+    }
+    response = requests.post(f"http://localhost:8000/predict/{model_choice}", json=data)
+    if response.status_code == 200:
+        result = response.json()
+        st.success(f"Predicted Score: {round(result['prediction'], 2)}")
+    else:
+        st.error("Prediction failed. Check API connection.")
 
-# Add model selection with description
-st.sidebar.markdown("---")
-st.sidebar.header("🤖 Zgjedhja e Modelit")
-model_choice = st.sidebar.selectbox(
-    "Zgjidhni Modelin",
-    ["RandomForest", "LinearRegression", "SVM"],
-    help="Zgjidhni modelin e machine learning për parashikim"
-)
+st.markdown("## 📊 Gender Comparison Analysis")
+if st.button("Show Gender Analysis"):
+    response = requests.get("http://localhost:8000/gender-comparison")
+    if response.status_code == 200:
+        result = pd.DataFrame(response.json())
+        result = result.rename_axis("Gender").reset_index()
+        st.dataframe(result)
+        st.markdown("#### Average Scores by Gender")
+        fig, ax = plt.subplots(figsize=(6, 4))
+        result.set_index("Gender").T.plot(kind="bar", ax=ax)
+        plt.title("Average Scores by Gender")
+        plt.ylabel("Average Score")
+        st.pyplot(fig)
+    else:
+        st.error("Unable to load gender comparison data.")
 
-# Style the predict button
-predict_button = st.sidebar.button(
-    "Parashiko Performancën",
-    type="primary",
-    use_container_width=True
-)
-
-# Predict button
-if predict_button:
-    with st.spinner('Duke llogaritur parashikimin...'):
-        student_data = {
-            "gender": 1 if gender == "Mashkull" else 0,
-            "race/ethnicity": race_ethnicity,
-            "parental level of education": education,
-            "lunch": 1 if lunch == "Standarde" else 0,
-            "test preparation course": 1 if prep_course == "Po" else 0,
-            "reading score": reading_score,
-            "writing score": writing_score,
-            "study time": study_time
-        }
-
-        # Send prediction request to API
-        response = requests.post(
-            "http://127.0.0.1:5000/predict",
-            json={"models": model_choice, "inputs": student_data}
-        )
-
-        if response.status_code == 200:
-            prediction = response.json()["Performance Level"]
-            confidence = response.json().get("confidence", 0.85)
-
-            # Create evaluation data with Albanian labels
-            evaluation_data = {
-                "Niveli i Performancës": ["I Lartë", "I Ulët", "Mesatar", "nan"],
-                "Precizioni": [0.84, 0.66, 0.71, 0.00],
-                "Recall": [0.83, 0.60, 0.75, 0.00],
-                "F1-Score": [0.83, 0.63, 0.73, 0.00],
-                "Mbështetja": [75, 35, 89, 1]
-            }
-            eval_df = pd.DataFrame(evaluation_data)
-
-            # Then display metrics and visualizations
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric(
-                    label="Niveli i Parashikuar i Performancës",
-                    value=prediction,
-                    delta=f"{confidence * 100:.1f}% besueshmëri"
-                )
-            
-            with col2:
-                st.metric(
-                    label="Modeli i Përdorur",
-                    value=model_choice
-                )
-
-            # Now we can use eval_df safely
-            with st.expander("Shiko Metrikat e Detajuara të Modelit"):
-                st.dataframe(
-                    eval_df.style.background_gradient(cmap='Blues'),
-                    hide_index=True
-                )
-
-            # Display performance bar chart
-            performance_data = {"Performance Level": [prediction, "Low", "Medium", "High"], "Confidence": [confidence, 0, 0, 0]}
-            performance_df = pd.DataFrame(performance_data)
-
-            # Update the visualization
-            fig, ax = plt.subplots(figsize=(10, 6))
-            sns.barplot(x="Performance Level", y="Confidence", data=performance_df, palette="Blues_d", ax=ax)
-            plt.title("Besueshmëria e Parashikimit të Performancës")
-            ax.set_ylabel("Rezultati i Besueshmërisë")
-            ax.set_ylim(0, 1)  # Set y-axis limits from 0 to 1
-            st.pyplot(fig)
-            plt.close(fig)
-
-        else:
-            st.error("❌ Gabim: Nuk mund të merrej parashikimi. Ju lutem provoni përsëri.")
-
-# Add footer
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center'>
-    <small>Krijuar me ❤️ duke përdorur Streamlit | Projekt Master</small>
-</div>
-""", unsafe_allow_html=True)
+st.markdown("## 🔍 Feature Importance (Random Forest)")
+if st.button("Show Feature Importance"):
+    response = requests.get("http://localhost:8000/feature-importance")
+    if response.status_code == 200:
+        importance = pd.Series(response.json()).sort_values(ascending=True)
+        fig, ax = plt.subplots(figsize=(6, 4))
+        importance.plot(kind="barh", ax=ax)
+        plt.title("Feature Importance (Random Forest)")
+        plt.xlabel("Importance")
+        st.pyplot(fig)
+    else:
+        st.error("Unable to load feature importance.")

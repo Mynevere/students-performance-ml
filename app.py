@@ -1,77 +1,70 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import pandas as pd
-import pickle
-from flask import Flask, request, jsonify
-import os
+import numpy as np
+import joblib
 
-app = Flask(__name__)
+app = FastAPI(title="Student Performance Prediction API")
 
-# Load the trained models and column mappings
-models = {
-    "RandomForest": {
-        "model": os.path.join('models', 'RandomForest', 'student_performance_randomforestmodel.pkl'),
-        "columns": os.path.join('models', 'RandomForest', 'randomforestmodel_columns.pkl')
-    },
-    "LinearRegression": {
-        "model": os.path.join('models', 'LinearRegression', 'student_performance_linearregression_model.pkl'),
-        "columns": os.path.join('models', 'LinearRegression', 'linearregression_model_columns.pkl')
-    },
-    "SVM": {
-        "model": os.path.join('models', 'SVM', 'student_performance_svm_model.pkl'),
-        "columns": os.path.join('models', 'SVM', 'svm_model_columns.pkl')
-    }
+MODELS = {
+    "LinearRegression": joblib.load("models/LinearRegression/student_performance_linearregression_model.pkl"),
+    "RandomForest": joblib.load("models/RandomForest/student_performance_randomforest_model.pkl"),
+    "SVM": joblib.load("models/SVM/student_performance_svm_model.pkl"),
 }
 
-# Load all models
-loaded_models = {}
-loaded_columns = {}
+MODEL_COLUMNS = {
+    "LinearRegression": joblib.load("models/LinearRegression/linearregression_model_columns.pkl"),
+    "RandomForest": joblib.load("models/RandomForest/randomforest_model_columns.pkl"),
+    "SVM": joblib.load("models/SVM/svm_model_columns.pkl"),
+}
 
-for model_name, paths in models.items():
-    with open(paths["model"], "rb") as f:
-        loaded_models[model_name] = pickle.load(f)
-    with open(paths["columns"], "rb") as f:
-        loaded_columns[model_name] = pickle.load(f)
+SCALERS = {
+    "SVM": joblib.load("models/SVM/svm_model_scaler.pkl")
+}
 
-@app.route('/predict', methods=['POST'])
-def predict():
+class StudentInput(BaseModel):
+    gender: str
+    race_ethnicity: str
+    parental_education: str
+    lunch: str
+    test_preparation_course: str
+
+@app.post("/predict/{model_name}")
+def predict(model_name: str, student: StudentInput):
+    if model_name not in MODELS:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    model = MODELS[model_name]
+    columns = MODEL_COLUMNS[model_name]
+
+    data = pd.DataFrame([student.dict()])
+    data_encoded = pd.get_dummies(data)
+    data_encoded = data_encoded.reindex(columns=columns, fill_value=0)
+
+    if model_name == "SVM":
+        scaler = SCALERS["SVM"]
+        data_encoded = scaler.transform(data_encoded)
+
+    prediction = model.predict(data_encoded)
+    return {"prediction": float(prediction[0])}
+
+@app.get("/feature-importance")
+def feature_importance():
     try:
-        if request.is_json:
-            data = request.get_json()
-            model_choice = data.get('models')
-            student_data = data.get('inputs')
-
-            print(f"Received data: {student_data}")  # Debugging step
-
-            if model_choice not in loaded_models:
-                return jsonify({"error": "Invalid model choice"}), 400
-
-            # Convert input into DataFrame
-            df = pd.DataFrame([student_data])
-
-            # One-hot encode the input data to match training data format
-            df_encoded = pd.get_dummies(df)
-
-            # Ensure the columns are the same as in training
-            missing_cols = set(loaded_columns[model_choice]) - set(df_encoded.columns)
-            for col in missing_cols:
-                df_encoded[col] = 0
-
-            # Reorder columns to match training columns order
-            df_encoded = df_encoded[loaded_columns[model_choice]]
-
-            # Make prediction using selected model
-            prediction = loaded_models[model_choice].predict(df_encoded)[0]
-
-            # Assuming confidence is returned or calculated by the model
-            confidence = 0.85  # Placeholder value
-
-            return jsonify({"Performance Level": prediction, "confidence": confidence})
-
-        else:
-            return jsonify({"error": "Request must be in JSON format"}), 400
-
+        model = MODELS["RandomForest"]
+        columns = MODEL_COLUMNS["RandomForest"]
+        importance = pd.Series(model.feature_importances_, index=columns).sort_values(ascending=False)
+        return importance.to_dict()
     except Exception as e:
-        print(f"Error: {str(e)}")  # Log the error for debugging
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-if __name__ == "__main__":
-    app.run(host='127.0.0.1', port=5000, debug=True)
+@app.get("/gender-comparison")
+def gender_comparison():
+    df = pd.read_csv("StudentsPerformance.csv")
+    result = (
+        df.groupby("gender")[["math score", "reading score", "writing score"]]
+        .mean()
+        .round(2)
+        .to_dict()
+    )
+    return result

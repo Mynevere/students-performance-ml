@@ -1,112 +1,87 @@
 import pandas as pd
-import pickle
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score
+import joblib
+import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-import logging
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+import subprocess
 
-# Set up logging
-logging.basicConfig(level=logging.INFO,
-                   format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+DATA_PATH = "StudentsPerformance.csv"
+OUTPUT_DIR = "outputs"
 
-def load_and_preprocess_data(filepath):
-    """Load and preprocess the dataset."""
-    try:
-        data = pd.read_csv(filepath)
-        logger.info(f"Dataset loaded successfully with {data.shape[0]} rows")
-        
-        # Handle missing values
-        initial_rows = len(data)
-        data = data.dropna()
-        if len(data) < initial_rows:
-            logger.warning(f"Dropped {initial_rows - len(data)} rows with missing values")
-        
-        # Encode categorical variables
-        data = pd.get_dummies(data, drop_first=True)
-        return data
-    except Exception as e:
-        logger.error(f"Error loading data: {str(e)}")
-        raise
+def load_and_preprocess():
+    data = pd.read_csv(DATA_PATH)
+    data = pd.get_dummies(data, drop_first=True)
+    X = data.drop("math score", axis=1)
+    y = data["math score"]
+    return X, y
 
-def train_model(X, y):
-    """Train the linear regression model with cross-validation."""
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
+def train_and_evaluate():
+    X, y = load_and_preprocess()
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
     model = LinearRegression()
-    
-    # Perform cross-validation
-    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
-    logger.info(f"Cross-validation scores: {cv_scores}")
-    logger.info(f"Average CV score: {np.mean(cv_scores):.4f} (+/- {np.std(cv_scores) * 2:.4f})")
-    
-    # Train final model
     model.fit(X_train, y_train)
-    return model, X_train, X_test, y_train, y_test
-
-def evaluate_model(model, X_test, y_test):
-    """Evaluate the model using multiple metrics."""
     y_pred = model.predict(X_test)
-    
-    metrics = {
-        'MSE': mean_squared_error(y_test, y_pred),
-        'RMSE': np.sqrt(mean_squared_error(y_test, y_pred)),
-        'MAE': mean_absolute_error(y_test, y_pred),
-        'R2': r2_score(y_test, y_pred)
-    }
-    return metrics
 
-def save_model_artifacts(model, columns, metrics, model_path, columns_path, eval_path):
-    """Save model, columns, and evaluation results."""
-    try:
-        with open(model_path, "wb") as f:
-            pickle.dump(model, f)
-        
-        with open(columns_path, "wb") as f:
-            pickle.dump(columns, f)
-            
-        with open(eval_path, "w") as f:
-            for metric_name, value in metrics.items():
-                f.write(f"{metric_name}: {value}\n")
-        
-        logger.info("Model artifacts saved successfully")
-    except Exception as e:
-        logger.error(f"Error saving model artifacts: {str(e)}")
-        raise
+    mae = mean_absolute_error(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_test, y_pred)
 
-def main():
+    print(f"MAE={mae:.2f}, MSE={mse:.2f}, RMSE={rmse:.2f}, R2={r2:.2f}")
+
+    os.makedirs("models/LinearRegression", exist_ok=True)
+    joblib.dump(model, "models/LinearRegression/student_performance_linearregression_model.pkl")
+    joblib.dump(X.columns, "models/LinearRegression/linearregression_model_columns.pkl")
+
+    os.makedirs(f"{OUTPUT_DIR}/metrics", exist_ok=True)
+    with open(f"{OUTPUT_DIR}/metrics/linearregression_metrics.txt", "w") as f:
+        f.write(f"MAE={mae:.4f}\nMSE={mse:.4f}\nRMSE={rmse:.4f}\nR2={r2:.4f}\n")
+
+    os.makedirs(f"{OUTPUT_DIR}/figures", exist_ok=True)
+
+
+    plt.figure(figsize=(6,6))
+    plt.scatter(y_test, y_pred, alpha=0.6, edgecolors="k")
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], "r--")
+    plt.xlabel("Actual")
+    plt.ylabel("Predicted")
+    plt.title("Linear Regression - Predicted vs Actual")
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/figures/linearregression_scatter.png")
+    plt.close()
+
+    # Residuals Distribution
+    residuals = y_test - y_pred
+    plt.figure(figsize=(6,4))
+    sns.histplot(residuals, bins=20, kde=True, color="green")
+    plt.title("Linear Regression - Residuals Distribution")
+    plt.xlabel("Residuals")
+    plt.savefig(f"{OUTPUT_DIR}/figures/linearregression_residuals.png")
+    plt.close()
+
+    # Residuals vs Predicted
+    plt.figure(figsize=(6,4))
+    plt.scatter(y_pred, residuals, alpha=0.6, color="purple")
+    plt.axhline(0, color="red", linestyle="--")
+    plt.xlabel("Predicted")
+    plt.ylabel("Residuals")
+    plt.title("Linear Regression - Residuals vs Predicted")
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/figures/linearregression_residuals_vs_predicted.png")
+    plt.close()
+
     try:
-        # Load and preprocess data
-        data = load_and_preprocess_data("../DataSet/StudentsPerformance.csv")
-        
-        # Split into features and target
-        X = data.drop(['math score'], axis=1)
-        y = data['math score']
-        
-        # Train model
-        model, X_train, X_test, y_train, y_test = train_model(X, y)
-        
-        # Evaluate model
-        metrics = evaluate_model(model, X_test, y_test)
-        
-        # Save all artifacts
-        save_model_artifacts(
-            model=model,
-            columns=X.columns,
-            metrics=metrics,
-            model_path="student_performance_linearregression_model.pkl",
-            columns_path="linearregression_model_columns.pkl",
-            eval_path="linearregression_model_evaluation.txt"
-        )
-        
-        # Log results
-        for metric_name, value in metrics.items():
-            logger.info(f"{metric_name}: {value:.4f}")
-            
+        subprocess.run(["python", "analysis/generate_comparison.py"], check=True)
+        subprocess.run(["python", "analysis/generate_correlation.py"], check=True)
     except Exception as e:
-        logger.error(f"An error occurred: {str(e)}")
-        raise
+        print(f"Warning: Could not run analysis scripts: {e}")
 
 if __name__ == "__main__":
-    main()
+    train_and_evaluate()
